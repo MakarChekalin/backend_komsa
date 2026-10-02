@@ -39,4 +39,10 @@ internal static partial class AccountServiceLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Deposited {Amount} into account {AccountNumber}")]
     public static partial void Deposited(ILogger logger, decimal amount, string accountNumber);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Withdrawal of {Amount} from account {AccountNumber} rejected: amount must be positive")]
+    public static partial void WithdrawInvalidAmount(ILogger logger, decimal amount, string accountNumber);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Deposit of {Amount} into account {AccountNumber} rejected: amount must be positive")]
+    public static partial void DepositInvalidAmount(ILogger logger, decimal amount, string accountNumber);
 }

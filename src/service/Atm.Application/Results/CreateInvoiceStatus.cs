@@ -5,4 +5,5 @@ public enum CreateInvoiceStatus
     Success,
     Unauthorized,
     PayerNotFound,
+    InvalidAmount,
 }

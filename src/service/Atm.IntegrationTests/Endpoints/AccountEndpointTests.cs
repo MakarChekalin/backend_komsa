@@ -165,6 +165,60 @@ public class AccountEndpointTests : GrpcServiceTestBase
         await act.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.PermissionDenied);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("-0.01")]
+    public async Task Deposit_WithZeroOrNegativeAmount_ShouldFailWithInvalidArgumentAndKeepBalance(string amount)
+    {
+        string owner = UniqueId("owner");
+        string accountNumber = UniqueId("account");
+        await SeedUserAsync(owner);
+        await new PostgresAccountRepository(Grpc.ConnectionProvider).SaveAsync(new Account(accountNumber, "1234", owner, 100));
+        Guid session = await SeedUserSessionAsync(accountNumber);
+
+        Func<Task> act = () => Grpc.AccountClient.DepositAsync(new AmountRequest
+        {
+            SessionKey = session.ToString(),
+            Amount = amount,
+            AccountNumber = accountNumber,
+            UserId = owner,
+        }).ResponseAsync;
+
+        await act.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+
+        Account? account = await new PostgresAccountRepository(Grpc.ConnectionProvider).GetByNumberAsync(accountNumber);
+        Assert.NotNull(account);
+        account.Balance.Should().Be(100);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("-0.01")]
+    public async Task Withdraw_WithZeroOrNegativeAmount_ShouldFailWithInvalidArgumentAndKeepBalance(string amount)
+    {
+        string owner = UniqueId("owner");
+        string accountNumber = UniqueId("account");
+        await SeedUserAsync(owner);
+        await new PostgresAccountRepository(Grpc.ConnectionProvider).SaveAsync(new Account(accountNumber, "1234", owner, 100));
+        Guid session = await SeedUserSessionAsync(accountNumber);
+
+        Func<Task> act = () => Grpc.AccountClient.WithdrawAsync(new AmountRequest
+        {
+            SessionKey = session.ToString(),
+            Amount = amount,
+            AccountNumber = accountNumber,
+            UserId = owner,
+        }).ResponseAsync;
+
+        await act.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+
+        Account? account = await new PostgresAccountRepository(Grpc.ConnectionProvider).GetByNumberAsync(accountNumber);
+        Assert.NotNull(account);
+        account.Balance.Should().Be(100);
+    }
+
     private static string UniqueId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     private async Task<Guid> SeedAdminSessionAsync()

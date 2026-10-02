@@ -98,6 +98,12 @@ public class AccountService : IAccountService
             return WithdrawResult.Unauthorized;
         }
 
+        if (amount <= 0)
+        {
+            AccountServiceLog.WithdrawInvalidAmount(_logger, amount, accountNumber);
+            return WithdrawResult.InvalidAmount;
+        }
+
         bool success = account.Withdraw(amount);
 
         if (!success)
@@ -140,6 +146,12 @@ public class AccountService : IAccountService
         {
             AccountServiceLog.DepositNotOwner(_logger, accountNumber, userId);
             return DepositResult.Unauthorized;
+        }
+
+        if (amount <= 0)
+        {
+            AccountServiceLog.DepositInvalidAmount(_logger, amount, accountNumber);
+            return DepositResult.InvalidAmount;
         }
 
         account.Deposit(amount);

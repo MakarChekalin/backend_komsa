@@ -1,6 +1,8 @@
 using Atm.Domain;
 using Atm.Infrastructure;
 using FluentAssertions;
+using Npgsql;
+using System.Text.Json;
 
 namespace Atm.IntegrationTests.Repositories;
 
@@ -33,7 +35,47 @@ public class PostgresOperationRepositoryTests : RepositoryTestBase
     [InlineData("250.75")]
     [InlineData("79228162514264337593543950335")]
     [InlineData("0.0000000000000000000000000001")]
-    public async Task SaveAsync_ThenRead_ShouldRoundTripDecimalAmountInJsonPayload(string amountText)
+    public async Task SaveAsync_ShouldWriteExactDecimalAmountIntoJsonPayload(string amountText)
+    {
+        decimal amount = decimal.Parse(amountText, System.Globalization.CultureInfo.InvariantCulture);
+        var repository = new PostgresOperationRepository(Fixture.ConnectionProvider, Fixture.Serializer);
+        var operation = new Operation("40817123", OperationType.Deposit, amount);
+
+        await repository.SaveAsync(operation);
+
+        JsonElement payload = await ReadRawPayloadAsync("40817123");
+
+        FindProperty(payload, "amount").GetDecimal().Should().Be(amount);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("0.01")]
+    [InlineData("250.75")]
+    [InlineData("79228162514264337593543950335")]
+    [InlineData("0.0000000000000000000000000001")]
+    public async Task SaveAsync_ShouldKeepAmountColumnAndJsonPayloadAmountEqual(string amountText)
+    {
+        decimal amount = decimal.Parse(amountText, System.Globalization.CultureInfo.InvariantCulture);
+        var repository = new PostgresOperationRepository(Fixture.ConnectionProvider, Fixture.Serializer);
+
+        await repository.SaveAsync(new Operation("40817123", OperationType.Withdraw, amount));
+
+        JsonElement payload = await ReadRawPayloadAsync("40817123");
+        decimal column = await ReadRawAmountColumnAsync("40817123");
+
+        FindProperty(payload, "amount").GetDecimal().Should().Be(column);
+        column.Should().Be(amount);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("0.01")]
+    [InlineData("1")]
+    [InlineData("250.75")]
+    [InlineData("79228162514264337593543950335")]
+    [InlineData("0.0000000000000000000000000001")]
+    public async Task SaveAsync_ThenRead_ShouldRoundTripDecimalAmount(string amountText)
     {
         decimal amount = decimal.Parse(amountText, System.Globalization.CultureInfo.InvariantCulture);
         var repository = new PostgresOperationRepository(Fixture.ConnectionProvider, Fixture.Serializer);
@@ -44,6 +86,31 @@ public class PostgresOperationRepositoryTests : RepositoryTestBase
         Operation loaded = await SingleAsync(repository, "40817123");
 
         loaded.Amount.Should().Be(amount);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithInvoiceId_ShouldWriteInvoiceIdIntoJsonPayload()
+    {
+        var repository = new PostgresOperationRepository(Fixture.ConnectionProvider, Fixture.Serializer);
+        var invoiceId = Guid.NewGuid();
+
+        await repository.SaveAsync(new Operation("40817123", OperationType.Deposit, 50, invoiceId));
+
+        JsonElement payload = await ReadRawPayloadAsync("40817123");
+
+        FindProperty(payload, "invoiceId").GetGuid().Should().Be(invoiceId);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithoutInvoiceId_ShouldWriteNullInvoiceIdIntoJsonPayload()
+    {
+        var repository = new PostgresOperationRepository(Fixture.ConnectionProvider, Fixture.Serializer);
+
+        await repository.SaveAsync(new Operation("40817123", OperationType.Deposit, 50));
+
+        JsonElement payload = await ReadRawPayloadAsync("40817123");
+
+        FindProperty(payload, "invoiceId").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Fact]
@@ -116,6 +183,17 @@ public class PostgresOperationRepositoryTests : RepositoryTestBase
         secondPage.Select(o => o.Amount).Should().Equal(3);
     }
 
+    private static JsonElement FindProperty(JsonElement payload, string name)
+    {
+        foreach (JsonProperty property in payload.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                return property.Value;
+        }
+
+        throw new InvalidOperationException($"Payload has no '{name}' property: {payload}");
+    }
+
     private static async Task<Operation> SingleAsync(PostgresOperationRepository repository, string accountNumber)
     {
         List<Operation> operations = await CollectAsync(repository.GetByAccountNumberAsync(accountNumber, null, 10));
@@ -130,5 +208,32 @@ public class PostgresOperationRepositoryTests : RepositoryTestBase
             result.Add(operation);
 
         return result;
+    }
+
+    private async Task<JsonElement> ReadRawPayloadAsync(string accountNumber)
+    {
+        await using var connection = new NpgsqlConnection(Fixture.ConnectionString);
+        await connection.OpenAsync();
+
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.CommandText = "select payload::text from operations where account_number = @account";
+        command.Parameters.AddWithValue("account", accountNumber);
+
+        var json = (string)(await command.ExecuteScalarAsync() ?? throw new InvalidOperationException("No operation found"));
+
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    private async Task<decimal> ReadRawAmountColumnAsync(string accountNumber)
+    {
+        await using var connection = new NpgsqlConnection(Fixture.ConnectionString);
+        await connection.OpenAsync();
+
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.CommandText = "select amount from operations where account_number = @account";
+        command.Parameters.AddWithValue("account", accountNumber);
+
+        return (decimal)(await command.ExecuteScalarAsync() ?? throw new InvalidOperationException("No operation found"));
     }
 }

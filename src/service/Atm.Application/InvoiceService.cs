@@ -46,6 +46,15 @@ public class InvoiceService : IInvoiceService
             return new CreateInvoiceResult(CreateInvoiceStatus.Unauthorized, null);
         }
 
+        if (await GetOwnedSessionAccountAsync(session.AccountNumber, userId) == null)
+            return new CreateInvoiceResult(CreateInvoiceStatus.Unauthorized, null);
+
+        if (amount <= 0)
+        {
+            InvoiceServiceLog.CreateInvoiceInvalidAmount(_logger, amount);
+            return new CreateInvoiceResult(CreateInvoiceStatus.InvalidAmount, null);
+        }
+
         if (!await _accountRepository.ExistsAsync(payerAccountNumber))
         {
             InvoiceServiceLog.CreateInvoicePayerNotFound(_logger, payerAccountNumber);
@@ -96,7 +105,13 @@ public class InvoiceService : IInvoiceService
         if (payer == null || payee == null)
             return PayInvoiceResult.NotFound;
 
-        if (!invoice.Pay())
+        if (payer.UserId != userId)
+        {
+            InvoiceServiceLog.SessionAccountNotOwned(_logger, payer.Number, userId);
+            return PayInvoiceResult.Unauthorized;
+        }
+
+        if (!invoice.CanBePaid)
         {
             InvoiceServiceLog.PayInvoiceAlreadyProcessed(_logger, invoiceId);
             return PayInvoiceResult.AlreadyProcessed;
@@ -109,6 +124,7 @@ public class InvoiceService : IInvoiceService
         }
 
         payee.Deposit(invoice.Amount);
+        invoice.Pay();
 
         await using IPersistenceTransaction transaction = await _transactionProvider.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
 
@@ -156,6 +172,9 @@ public class InvoiceService : IInvoiceService
             return CancelInvoiceResult.Unauthorized;
         }
 
+        if (await GetOwnedSessionAccountAsync(session.AccountNumber, userId) == null)
+            return CancelInvoiceResult.Unauthorized;
+
         if (!invoice.Cancel())
         {
             InvoiceServiceLog.CancelInvoiceAlreadyProcessed(_logger, invoiceId);
@@ -180,6 +199,9 @@ public class InvoiceService : IInvoiceService
         Session? session = await _sessionRepository.GetByKeyAsync(sessionKey);
 
         if (session == null || session.Type != SessionType.User || session.AccountNumber == null)
+            return new GetOutgoingInvoicesResult(GetInvoicesStatus.Unauthorized, null, null);
+
+        if (await GetOwnedSessionAccountAsync(session.AccountNumber, userId) == null)
             return new GetOutgoingInvoicesResult(GetInvoicesStatus.Unauthorized, null, null);
 
         var invoices = new List<Invoice>();
@@ -210,6 +232,9 @@ public class InvoiceService : IInvoiceService
         if (session == null || session.Type != SessionType.User || session.AccountNumber == null)
             return new GetIncomingInvoicesResult(GetInvoicesStatus.Unauthorized, null, null);
 
+        if (await GetOwnedSessionAccountAsync(session.AccountNumber, userId) == null)
+            return new GetIncomingInvoicesResult(GetInvoicesStatus.Unauthorized, null, null);
+
         var invoices = new List<Invoice>();
 
         await foreach (Invoice invoice in _invoiceRepository.GetIncomingAsync(session.AccountNumber, payeeAccountNumber, status, cursor, pageSize + 1))
@@ -224,5 +249,18 @@ public class InvoiceService : IInvoiceService
         }
 
         return new GetIncomingInvoicesResult(GetInvoicesStatus.Success, invoices, nextCursor);
+    }
+
+    private async Task<Account?> GetOwnedSessionAccountAsync(string accountNumber, string userId)
+    {
+        Account? account = await _accountRepository.GetByNumberAsync(accountNumber);
+
+        if (account == null || account.UserId != userId)
+        {
+            InvoiceServiceLog.SessionAccountNotOwned(_logger, accountNumber, userId);
+            return null;
+        }
+
+        return account;
     }
 }

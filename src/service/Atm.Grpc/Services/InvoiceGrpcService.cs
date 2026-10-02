@@ -25,6 +25,7 @@ public class InvoiceGrpcService : InvoiceService.InvoiceServiceBase
             CreateInvoiceStatus.Success when result.InvoiceId is { } invoiceId => new CreateInvoiceResponse { InvoiceId = invoiceId.ToString() },
             CreateInvoiceStatus.Unauthorized => throw new RpcException(new Status(StatusCode.PermissionDenied, "Not authorized")),
             CreateInvoiceStatus.PayerNotFound => throw new RpcException(new Status(StatusCode.NotFound, "Payer account not found")),
+            CreateInvoiceStatus.InvalidAmount => throw new RpcException(new Status(StatusCode.InvalidArgument, "Amount must be positive")),
             _ => throw new RpcException(new Status(StatusCode.Internal, "Unexpected result")),
         };
     }

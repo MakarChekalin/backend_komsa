@@ -4,4 +4,5 @@ public enum DepositResult
 {
     Success,
     Unauthorized,
+    InvalidAmount,
 }

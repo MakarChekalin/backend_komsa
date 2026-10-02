@@ -37,9 +37,11 @@ public class Invoice
         CreatedAt = createdAt ?? DateTime.UtcNow;
     }
 
+    public bool CanBePaid => Status == InvoiceStatus.Created;
+
     public bool Pay()
     {
-        if (Status != InvoiceStatus.Created)
+        if (!CanBePaid)
             return false;
 
         Status = InvoiceStatus.Paid;

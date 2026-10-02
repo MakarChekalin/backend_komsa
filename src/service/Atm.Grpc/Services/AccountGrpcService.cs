@@ -44,6 +44,7 @@ public class AccountGrpcService : AccountService.AccountServiceBase
             WithdrawResult.Success => new WithdrawResponse(),
             WithdrawResult.Unauthorized => throw new RpcException(new Status(StatusCode.PermissionDenied, "Not authorized")),
             WithdrawResult.InsufficientFunds => throw new RpcException(new Status(StatusCode.FailedPrecondition, "Insufficient funds")),
+            WithdrawResult.InvalidAmount => throw new RpcException(new Status(StatusCode.InvalidArgument, "Amount must be positive")),
             _ => throw new RpcException(new Status(StatusCode.Internal, "Unexpected result")),
         };
     }
@@ -59,6 +60,7 @@ public class AccountGrpcService : AccountService.AccountServiceBase
         {
             DepositResult.Success => new DepositResponse(),
             DepositResult.Unauthorized => throw new RpcException(new Status(StatusCode.PermissionDenied, "Not authorized")),
+            DepositResult.InvalidAmount => throw new RpcException(new Status(StatusCode.InvalidArgument, "Amount must be positive")),
             _ => throw new RpcException(new Status(StatusCode.Internal, "Unexpected result")),
         };
     }

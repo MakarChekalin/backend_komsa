@@ -141,6 +141,47 @@ public class AccountServiceTests
         _accountRepository.Verify(r => r.SaveAsync(It.IsAny<Account>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-0.01")]
+    [InlineData("-1")]
+    [InlineData("-500")]
+    public async Task Withdraw_WithZeroOrNegativeAmount_ShouldReturnInvalidAmountAndKeepBalance(string amountText)
+    {
+        decimal amount = decimal.Parse(amountText, System.Globalization.CultureInfo.InvariantCulture);
+        var account = new Account("40817123", "1234", "user-1", 1000);
+        var session = new Session(SessionType.User, "40817123");
+
+        _accountRepository.Setup(r => r.GetByNumberAsync("40817123")).ReturnsAsync(account);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+
+        AccountService service = CreateService();
+
+        WithdrawResult result = await service.WithdrawAsync(session.Key, amount, "40817123", "user-1");
+
+        result.Should().Be(WithdrawResult.InvalidAmount);
+        account.Balance.Should().Be(1000);
+        _accountRepository.Verify(r => r.SaveAsync(It.IsAny<Account>()), Times.Never);
+        _operationRepository.Verify(r => r.SaveAsync(It.IsAny<Operation>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Withdraw_WithSmallestPositiveAmount_ShouldSucceed()
+    {
+        var account = new Account("40817123", "1234", "user-1", 1);
+        var session = new Session(SessionType.User, "40817123");
+
+        _accountRepository.Setup(r => r.GetByNumberAsync("40817123")).ReturnsAsync(account);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+
+        AccountService service = CreateService();
+
+        WithdrawResult result = await service.WithdrawAsync(session.Key, 0.01m, "40817123", "user-1");
+
+        result.Should().Be(WithdrawResult.Success);
+        account.Balance.Should().Be(0.99m);
+    }
+
     [Fact]
     public async Task Withdraw_WithNoSession_ShouldReturnUnauthorized()
     {
@@ -216,6 +257,47 @@ public class AccountServiceTests
         result.Should().Be(DepositResult.Success);
         account.Balance.Should().Be(750);
         _accountRepository.Verify(r => r.SaveAsync(account), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-0.01")]
+    [InlineData("-1")]
+    [InlineData("-500")]
+    public async Task Deposit_WithZeroOrNegativeAmount_ShouldReturnInvalidAmountAndKeepBalance(string amountText)
+    {
+        decimal amount = decimal.Parse(amountText, System.Globalization.CultureInfo.InvariantCulture);
+        var account = new Account("40817123", "1234", "user-1", 500);
+        var session = new Session(SessionType.User, "40817123");
+
+        _accountRepository.Setup(r => r.GetByNumberAsync("40817123")).ReturnsAsync(account);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+
+        AccountService service = CreateService();
+
+        DepositResult result = await service.DepositAsync(session.Key, amount, "40817123", "user-1");
+
+        result.Should().Be(DepositResult.InvalidAmount);
+        account.Balance.Should().Be(500);
+        _accountRepository.Verify(r => r.SaveAsync(It.IsAny<Account>()), Times.Never);
+        _operationRepository.Verify(r => r.SaveAsync(It.IsAny<Operation>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Deposit_WithSmallestPositiveAmount_ShouldSucceed()
+    {
+        var account = new Account("40817123", "1234", "user-1", 0);
+        var session = new Session(SessionType.User, "40817123");
+
+        _accountRepository.Setup(r => r.GetByNumberAsync("40817123")).ReturnsAsync(account);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+
+        AccountService service = CreateService();
+
+        DepositResult result = await service.DepositAsync(session.Key, 0.01m, "40817123", "user-1");
+
+        result.Should().Be(DepositResult.Success);
+        account.Balance.Should().Be(0.01m);
     }
 
     [Fact]
