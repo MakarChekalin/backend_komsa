@@ -1,17 +1,24 @@
 using ApprovalResult.Kafka.Contracts;
 using Atm.Domain;
 using Itmo.Dev.Platform.Kafka.Consumer;
+using Itmo.Dev.Platform.Persistence.Abstractions.Transactions;
+using System.Data;
 
 namespace Atm.Grpc.Kafka;
 
 public class ApprovalResultKafkaHandler : IKafkaConsumerHandler<ApprovalResultKey, ApprovalResultValue>
 {
     private readonly IInvoiceRepository _invoiceRepository;
+    private readonly IPersistenceTransactionProvider _transactionProvider;
     private readonly ILogger<ApprovalResultKafkaHandler> _logger;
 
-    public ApprovalResultKafkaHandler(IInvoiceRepository invoiceRepository, ILogger<ApprovalResultKafkaHandler> logger)
+    public ApprovalResultKafkaHandler(
+        IInvoiceRepository invoiceRepository,
+        IPersistenceTransactionProvider transactionProvider,
+        ILogger<ApprovalResultKafkaHandler> logger)
     {
         _invoiceRepository = invoiceRepository;
+        _transactionProvider = transactionProvider;
         _logger = logger;
     }
 
@@ -20,12 +27,16 @@ public class ApprovalResultKafkaHandler : IKafkaConsumerHandler<ApprovalResultKe
         CancellationToken cancellationToken)
     {
         foreach (IKafkaConsumerMessage<ApprovalResultKey, ApprovalResultValue> message in messages)
-            await HandleAsync(message.Value);
+            await HandleAsync(message.Value, cancellationToken);
     }
 
-    private async Task HandleAsync(ApprovalResultValue value)
+    private async Task HandleAsync(ApprovalResultValue value, CancellationToken cancellationToken)
     {
-        Atm.Domain.Invoice? invoice = await _invoiceRepository.GetByExternalIdAsync(value.InvoiceId);
+        await using IPersistenceTransaction transaction = await _transactionProvider.BeginTransactionAsync(
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
+
+        Atm.Domain.Invoice? invoice = await _invoiceRepository.GetByExternalIdForUpdateAsync(value.InvoiceId);
 
         if (invoice == null)
         {
@@ -53,5 +64,7 @@ public class ApprovalResultKafkaHandler : IKafkaConsumerHandler<ApprovalResultKe
         }
 
         await _invoiceRepository.SaveAsync(invoice);
+
+        await transaction.CommitAsync(cancellationToken);
     }
 }

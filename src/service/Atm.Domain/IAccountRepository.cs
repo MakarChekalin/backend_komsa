@@ -4,6 +4,8 @@ public interface IAccountRepository // перешел на async(что бы п�
 {
     Task<Account?> GetByNumberAsync(string number);
 
+    Task<Account?> GetByNumberForUpdateAsync(string number);
+
     Task<long> SaveAsync(Account account);
 
     Task<bool> ExistsAsync(string number); // сущ?

@@ -43,9 +43,11 @@ public class Invoice
         ExternalId = externalId;
     }
 
+    public bool CanBePaid => Status is InvoiceStatus.Created or InvoiceStatus.Approved;
+
     public bool Pay()
     {
-        if (Status != InvoiceStatus.Created && Status != InvoiceStatus.Approved)
+        if (!CanBePaid)
             return false;
 
         Status = InvoiceStatus.Paid;

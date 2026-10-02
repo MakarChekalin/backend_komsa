@@ -3,9 +3,12 @@ using Grpc.Net.Client;
 using Itmo.Dev.Platform.Persistence.Abstractions.Connections;
 using Itmo.Dev.Platform.Testing.ApplicationFactories;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using IInvoiceApprovalClient = Atm.Application.IInvoiceApprovalClient;
 
 namespace Atm.IntegrationTests;
 
@@ -25,7 +28,26 @@ public sealed class AtmGrpcServiceFixture : IAsyncLifetime
 
     public InvoiceService.InvoiceServiceClient InvoiceClient => new(RequireChannel());
 
+    public FakeInvoiceApprovalClient ApprovalClient { get; } = new();
+
+    public string ConnectionString => _container.GetConnectionString();
+
+    public Users.Grpc.Contracts.UserService.UserServiceClient UserClient => new(RequireChannel());
+
+    public IServiceProvider Services => RequireFactory().Services;
+
     public IPersistenceConnectionProvider ConnectionProvider => RequireScope().ServiceProvider.GetRequiredService<IPersistenceConnectionProvider>();
+
+    public async Task<long> CountOutboxMessagesAsync()
+    {
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.CommandText = "select count(*) from message_persistence.persisted_messages";
+
+        return (long)(await command.ExecuteScalarAsync() ?? 0L);
+    }
 
     public async Task InitializeAsync()
     {
@@ -45,7 +67,12 @@ public sealed class AtmGrpcServiceFixture : IAsyncLifetime
             .AddConfigurationEntry("MessagePersistence:Postgres:Username", RequireValue(connectionString.Username, "Username"))
             .AddConfigurationEntry("MessagePersistence:Postgres:Password", RequireValue(connectionString.Password, "Password"))
             .AddConfigurationEntry("AdminPassword", AdminPassword)
-            .Build();
+            .Build()
+            .WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IInvoiceApprovalClient>();
+                services.AddSingleton<IInvoiceApprovalClient>(ApprovalClient);
+            }));
 
         HttpClient client = factory.CreateDefaultClient(new ResponseVersionHandler());
         Uri baseAddress = client.BaseAddress ?? throw new InvalidOperationException("Test HttpClient has no base address");
@@ -71,6 +98,11 @@ public sealed class AtmGrpcServiceFixture : IAsyncLifetime
     private GrpcChannel RequireChannel()
     {
         return _channel ?? throw new InvalidOperationException("Fixture is not initialized yet");
+    }
+
+    private WebApplicationFactory<Program> RequireFactory()
+    {
+        return _factory ?? throw new InvalidOperationException("Fixture is not initialized yet");
     }
 
     private IServiceScope RequireScope()

@@ -33,6 +33,60 @@ public class AccountServiceTests
     }
 
     [Fact]
+    public async Task CreateAccount_ShouldSaveAccountWithRequestedType()
+    {
+        var session = new Session(SessionType.Admin);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+        _accountRepository.Setup(r => r.ExistsAsync("40817123")).ReturnsAsync(false);
+        _userRepository.Setup(r => r.ExistsAsync("user-1")).ReturnsAsync(true);
+        _accountRepository.Setup(r => r.CountByUserIdAsync("user-1")).ReturnsAsync(0);
+
+        AccountService service = CreateService();
+
+        await service.CreateAccountAsync(session.Key, "40817123", "1234", "user-1", AccountType.Corporate);
+
+        _accountRepository.Verify(r => r.SaveAsync(It.Is<Account>(a => a.Type == AccountType.Corporate)), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(AccountType.Personal)]
+    [InlineData(AccountType.Corporate)]
+    public async Task CreateAccount_ShouldPublishEventWithExternalIdsAndType(AccountType type)
+    {
+        var session = new Session(SessionType.Admin);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+        _accountRepository.Setup(r => r.ExistsAsync("40817123")).ReturnsAsync(false);
+        _userRepository.Setup(r => r.ExistsAsync("user-1")).ReturnsAsync(true);
+        _userRepository.Setup(r => r.GetExternalIdAsync("user-1")).ReturnsAsync(5);
+        _accountRepository.Setup(r => r.CountByUserIdAsync("user-1")).ReturnsAsync(0);
+        _accountRepository.Setup(r => r.SaveAsync(It.IsAny<Account>())).ReturnsAsync(77);
+
+        AccountService service = CreateService();
+
+        await service.CreateAccountAsync(session.Key, "40817123", "1234", "user-1", type);
+
+        _accountEventPublisher.Verify(
+            p => p.PublishAccountCreatedAsync(5, 77, type, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAccount_WhenRejected_ShouldNotPublishEvent()
+    {
+        var session = new Session(SessionType.Admin);
+        _sessionRepository.Setup(r => r.GetByKeyAsync(session.Key)).ReturnsAsync(session);
+        _accountRepository.Setup(r => r.ExistsAsync("40817123")).ReturnsAsync(true);
+
+        AccountService service = CreateService();
+
+        await service.CreateAccountAsync(session.Key, "40817123", "1234", "user-1", AccountType.Corporate);
+
+        _accountEventPublisher.Verify(
+            p => p.PublishAccountCreatedAsync(It.IsAny<long>(), It.IsAny<long>(), It.IsAny<AccountType>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task CreateAccount_WithNoSession_ShouldReturnUnauthorized()
     {
         _sessionRepository.Setup(r => r.GetByKeyAsync(It.IsAny<Guid>())).ReturnsAsync((Session?)null);

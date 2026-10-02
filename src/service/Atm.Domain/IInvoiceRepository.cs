@@ -4,7 +4,11 @@ public interface IInvoiceRepository
 {
     Task<Invoice?> GetByIdAsync(Guid id);
 
+    Task<Invoice?> GetByIdForUpdateAsync(Guid id);
+
     Task<Invoice?> GetByExternalIdAsync(long externalId);
+
+    Task<Invoice?> GetByExternalIdForUpdateAsync(long externalId);
 
     Task<long> SaveAsync(Invoice invoice);
 

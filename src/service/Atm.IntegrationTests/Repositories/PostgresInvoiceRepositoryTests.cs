@@ -124,6 +124,160 @@ public class PostgresInvoiceRepositoryTests : RepositoryTestBase
         result.Should().OnlyContain(i => i.PayerAccountNumber == "payer-1");
     }
 
+    [Fact]
+    public async Task SaveAsync_ShouldReturnExternalIdMatchingTheLoadedInvoice()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 10);
+
+        long externalId = await repository.SaveAsync(invoice);
+        Invoice? loaded = await repository.GetByIdAsync(invoice.Id);
+
+        Assert.NotNull(loaded);
+        externalId.Should().BeGreaterThan(0);
+        loaded.ExternalId.Should().Be(externalId);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ForDifferentInvoices_ShouldReturnDifferentExternalIds()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+
+        long first = await repository.SaveAsync(new Invoice("payer-1", "payee-1", 10));
+        long second = await repository.SaveAsync(new Invoice("payer-1", "payee-1", 10));
+
+        first.Should().NotBe(second);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WhenInvoiceExists_ShouldReturnTheSameExternalId()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 10);
+
+        long first = await repository.SaveAsync(invoice);
+        invoice.Pay();
+        long second = await repository.SaveAsync(invoice);
+
+        second.Should().Be(first);
+    }
+
+    [Fact]
+    public async Task GetByExternalIdAsync_ShouldReturnInvoiceWithThatExternalId()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 10);
+        await repository.SaveAsync(new Invoice("payer-2", "payee-2", 99));
+        long externalId = await repository.SaveAsync(invoice);
+
+        Invoice? loaded = await repository.GetByExternalIdAsync(externalId);
+
+        Assert.NotNull(loaded);
+        loaded.Id.Should().Be(invoice.Id);
+        loaded.ExternalId.Should().Be(externalId);
+    }
+
+    [Fact]
+    public async Task GetByExternalIdAsync_WithUnknownExternalId_ShouldReturnNull()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+
+        Invoice? loaded = await repository.GetByExternalIdAsync(long.MaxValue);
+
+        loaded.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetByIdForUpdateAsync_ShouldReturnTheSameInvoiceAsGetByIdAsync()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 77.5m);
+        await repository.SaveAsync(invoice);
+
+        Invoice? plain = await repository.GetByIdAsync(invoice.Id);
+        Invoice? locked = await repository.GetByIdForUpdateAsync(invoice.Id);
+
+        Assert.NotNull(plain);
+        Assert.NotNull(locked);
+        locked.Id.Should().Be(plain.Id);
+        locked.Amount.Should().Be(77.5m);
+        locked.Status.Should().Be(plain.Status);
+        locked.ExternalId.Should().Be(plain.ExternalId);
+    }
+
+    [Fact]
+    public async Task GetByIdForUpdateAsync_WithUnknownId_ShouldReturnNull()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+
+        Invoice? loaded = await repository.GetByIdForUpdateAsync(Guid.NewGuid());
+
+        loaded.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetByExternalIdForUpdateAsync_ShouldReturnInvoiceWithThatExternalId()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 10);
+        long externalId = await repository.SaveAsync(invoice);
+
+        Invoice? loaded = await repository.GetByExternalIdForUpdateAsync(externalId);
+
+        Assert.NotNull(loaded);
+        loaded.Id.Should().Be(invoice.Id);
+    }
+
+    [Fact]
+    public async Task GetByExternalIdForUpdateAsync_WithUnknownExternalId_ShouldReturnNull()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+
+        Invoice? loaded = await repository.GetByExternalIdForUpdateAsync(long.MaxValue);
+
+        loaded.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(InvoiceStatus.Approved)]
+    [InlineData(InvoiceStatus.Declined)]
+    public async Task SaveAsync_ThenGetByIdAsync_ShouldRoundTripApprovalStatuses(InvoiceStatus status)
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+        var invoice = new Invoice("payer-1", "payee-1", 10);
+
+        if (status == InvoiceStatus.Approved)
+            invoice.Approve();
+        else
+            invoice.Decline();
+
+        await repository.SaveAsync(invoice);
+
+        Invoice? loaded = await repository.GetByIdAsync(invoice.Id);
+
+        Assert.NotNull(loaded);
+        loaded.Status.Should().Be(status);
+    }
+
+    [Fact]
+    public async Task GetIncomingAsync_FilteredByApprovedStatus_ShouldReturnOnlyApprovedInvoices()
+    {
+        var repository = new PostgresInvoiceRepository(Fixture.ConnectionProvider);
+
+        var approved = new Invoice("payer-1", "payee-1", 10);
+        approved.Approve();
+        var pending = new Invoice("payer-1", "payee-1", 20);
+
+        await repository.SaveAsync(approved);
+        await repository.SaveAsync(pending);
+
+        List<Invoice> result = await CollectAsync(
+            repository.GetIncomingAsync("payer-1", null, InvoiceStatus.Approved, null, 10));
+
+        result.Should().ContainSingle();
+        result[0].Id.Should().Be(approved.Id);
+    }
+
     private static async Task<List<Invoice>> CollectAsync(IAsyncEnumerable<Invoice> source)
     {
         var result = new List<Invoice>();

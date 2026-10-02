@@ -78,6 +78,95 @@ public class AccountEndpointTests : GrpcServiceTestBase
     }
 
     [Fact]
+    public async Task CreateAccount_WithCorporateType_ShouldPersistTypeAndAssignExternalId()
+    {
+        string owner = UniqueId("owner");
+        string accountNumber = UniqueId("account");
+        Guid adminSession = await SeedAdminSessionAsync();
+        await SeedUserAsync(owner);
+
+        await Grpc.AccountClient.CreateAccountAsync(new CreateAccountRequest
+        {
+            SessionKey = adminSession.ToString(),
+            Number = accountNumber,
+            PinCode = "1234",
+            OwnerUserId = owner,
+            AccountType = Atm.Grpc.AccountType.Corporate,
+        });
+
+        Account? created = await new PostgresAccountRepository(Grpc.ConnectionProvider).GetByNumberAsync(accountNumber);
+        Assert.NotNull(created);
+        created.Type.Should().Be(Atm.Domain.AccountType.Corporate);
+        created.ExternalId.Should().BeGreaterThan(0);
+    }
+
+    [Theory]
+    [InlineData(Atm.Grpc.AccountType.Unspecified)]
+    [InlineData(Atm.Grpc.AccountType.Personal)]
+    public async Task CreateAccount_WithPersonalOrUnspecifiedType_ShouldCreatePersonalAccount(Atm.Grpc.AccountType requestedType)
+    {
+        string owner = UniqueId("owner");
+        string accountNumber = UniqueId("account");
+        Guid adminSession = await SeedAdminSessionAsync();
+        await SeedUserAsync(owner);
+
+        await Grpc.AccountClient.CreateAccountAsync(new CreateAccountRequest
+        {
+            SessionKey = adminSession.ToString(),
+            Number = accountNumber,
+            PinCode = "1234",
+            OwnerUserId = owner,
+            AccountType = requestedType,
+        });
+
+        Account? created = await new PostgresAccountRepository(Grpc.ConnectionProvider).GetByNumberAsync(accountNumber);
+        Assert.NotNull(created);
+        created.Type.Should().Be(Atm.Domain.AccountType.Personal);
+    }
+
+    [Fact]
+    public async Task CreateAccount_ShouldWriteExactlyOneEventToOutbox()
+    {
+        string owner = UniqueId("owner");
+        Guid adminSession = await SeedAdminSessionAsync();
+        await SeedUserAsync(owner);
+        long before = await Grpc.CountOutboxMessagesAsync();
+
+        await Grpc.AccountClient.CreateAccountAsync(new CreateAccountRequest
+        {
+            SessionKey = adminSession.ToString(),
+            Number = UniqueId("account"),
+            PinCode = "1234",
+            OwnerUserId = owner,
+            AccountType = Atm.Grpc.AccountType.Corporate,
+        });
+
+        long after = await Grpc.CountOutboxMessagesAsync();
+        (after - before).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateAccount_WhenRejected_ShouldNotWriteAnythingToOutbox()
+    {
+        string owner = UniqueId("owner");
+        await SeedUserAsync(owner);
+        long before = await Grpc.CountOutboxMessagesAsync();
+
+        Func<Task> act = () => Grpc.AccountClient.CreateAccountAsync(new CreateAccountRequest
+        {
+            SessionKey = Guid.NewGuid().ToString(),
+            Number = UniqueId("account"),
+            PinCode = "1234",
+            OwnerUserId = owner,
+        }).ResponseAsync;
+
+        await act.Should().ThrowAsync<RpcException>();
+
+        long after = await Grpc.CountOutboxMessagesAsync();
+        after.Should().Be(before);
+    }
+
+    [Fact]
     public async Task Deposit_ToOwnAccount_ShouldIncreaseBalance()
     {
         string owner = UniqueId("owner");

@@ -14,26 +14,14 @@ public class PostgresAccountRepository : IAccountRepository
         _connectionProvider = connectionProvider;
     }
 
-    public async Task<Account?> GetByNumberAsync(string number)
+    public Task<Account?> GetByNumberAsync(string number)
     {
-        await using IPersistenceConnection connection = await _connectionProvider.GetConnectionAsync(CancellationToken.None);
+        return GetByNumberAsync(number, forUpdate: false);
+    }
 
-        await using IPersistenceCommand command = connection
-            .CreateCommand("select number, pin_code, user_id, balance, account_type, external_id from accounts where number = @number")
-            .AddParameter<string>("number", number);
-
-        await using DbDataReader reader = await command.ExecuteReaderAsync(CancellationToken.None);
-
-        if (!await reader.ReadAsync())
-            return null;
-
-        return new Account(
-            reader.GetString(reader.GetOrdinal("number")),
-            reader.GetString(reader.GetOrdinal("pin_code")),
-            reader.GetString(reader.GetOrdinal("user_id")),
-            reader.GetDecimal(reader.GetOrdinal("balance")),
-            Enum.Parse<AccountType>(reader.GetString(reader.GetOrdinal("account_type"))),
-            reader.GetInt64(reader.GetOrdinal("external_id")));
+    public Task<Account?> GetByNumberForUpdateAsync(string number)
+    {
+        return GetByNumberAsync(number, forUpdate: true);
     }
 
     public async Task<long> SaveAsync(Account account)
@@ -79,5 +67,34 @@ public class PostgresAccountRepository : IAccountRepository
         await reader.ReadAsync();
 
         return checked((int)reader.GetInt64(0));
+    }
+
+    private async Task<Account?> GetByNumberAsync(string number, bool forUpdate)
+    {
+        await using IPersistenceConnection connection = await _connectionProvider.GetConnectionAsync(CancellationToken.None);
+
+        string lockClause = forUpdate ? "for update" : string.Empty;
+
+        await using IPersistenceCommand command = connection
+            .CreateCommand($"""
+                select number, pin_code, user_id, balance, account_type, external_id
+                from accounts
+                where number = @number
+                {lockClause}
+                """)
+            .AddParameter<string>("number", number);
+
+        await using DbDataReader reader = await command.ExecuteReaderAsync(CancellationToken.None);
+
+        if (!await reader.ReadAsync())
+            return null;
+
+        return new Account(
+            reader.GetString(reader.GetOrdinal("number")),
+            reader.GetString(reader.GetOrdinal("pin_code")),
+            reader.GetString(reader.GetOrdinal("user_id")),
+            reader.GetDecimal(reader.GetOrdinal("balance")),
+            Enum.Parse<AccountType>(reader.GetString(reader.GetOrdinal("account_type"))),
+            reader.GetInt64(reader.GetOrdinal("external_id")));
     }
 }

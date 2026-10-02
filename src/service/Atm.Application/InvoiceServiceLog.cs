@@ -51,4 +51,7 @@ internal static partial class InvoiceServiceLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Cancelled invoice {InvoiceId}")]
     public static partial void InvoiceCancelled(ILogger logger, Guid invoiceId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Operation rejected: account {AccountNumber} does not belong to user {UserId}")]
+    public static partial void SessionAccountNotOwned(ILogger logger, string accountNumber, string userId);
 }

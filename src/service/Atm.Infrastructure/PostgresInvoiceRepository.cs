@@ -14,44 +14,24 @@ public class PostgresInvoiceRepository : IInvoiceRepository
         _connectionProvider = connectionProvider;
     }
 
-    public async Task<Invoice?> GetByIdAsync(Guid id)
+    public Task<Invoice?> GetByIdAsync(Guid id)
     {
-        await using IPersistenceConnection connection = await _connectionProvider.GetConnectionAsync(CancellationToken.None);
-
-        await using IPersistenceCommand command = connection
-            .CreateCommand("""
-                select id, payer_account_number, payee_account_number, amount, status, created_at, external_id
-                from invoices
-                where id = @id
-                """)
-            .AddParameter("id", id);
-
-        await using DbDataReader reader = await command.ExecuteReaderAsync(CancellationToken.None);
-
-        if (!await reader.ReadAsync())
-            return null;
-
-        return ReadInvoice(reader);
+        return GetSingleAsync("id = @key", "key", id, forUpdate: false);
     }
 
-    public async Task<Invoice?> GetByExternalIdAsync(long externalId)
+    public Task<Invoice?> GetByIdForUpdateAsync(Guid id)
     {
-        await using IPersistenceConnection connection = await _connectionProvider.GetConnectionAsync(CancellationToken.None);
+        return GetSingleAsync("id = @key", "key", id, forUpdate: true);
+    }
 
-        await using IPersistenceCommand command = connection
-            .CreateCommand("""
-                select id, payer_account_number, payee_account_number, amount, status, created_at, external_id
-                from invoices
-                where external_id = @externalId
-                """)
-            .AddParameter("externalId", externalId);
+    public Task<Invoice?> GetByExternalIdAsync(long externalId)
+    {
+        return GetSingleAsync("external_id = @key", "key", externalId, forUpdate: false);
+    }
 
-        await using DbDataReader reader = await command.ExecuteReaderAsync(CancellationToken.None);
-
-        if (!await reader.ReadAsync())
-            return null;
-
-        return ReadInvoice(reader);
+    public Task<Invoice?> GetByExternalIdForUpdateAsync(long externalId)
+    {
+        return GetSingleAsync("external_id = @key", "key", externalId, forUpdate: true);
     }
 
     public async Task<long> SaveAsync(Invoice invoice)
@@ -101,6 +81,30 @@ public class PostgresInvoiceRepository : IInvoiceRepository
             status,
             reader.GetDateTime(reader.GetOrdinal("created_at")),
             reader.GetInt64(reader.GetOrdinal("external_id")));
+    }
+
+    private async Task<Invoice?> GetSingleAsync<TKey>(string condition, string parameterName, TKey value, bool forUpdate)
+        where TKey : notnull
+    {
+        await using IPersistenceConnection connection = await _connectionProvider.GetConnectionAsync(CancellationToken.None);
+
+        string lockClause = forUpdate ? "for update" : string.Empty;
+
+        await using IPersistenceCommand command = connection
+            .CreateCommand($"""
+                select id, payer_account_number, payee_account_number, amount, status, created_at, external_id
+                from invoices
+                where {condition}
+                {lockClause}
+                """)
+            .AddParameter(parameterName, value);
+
+        await using DbDataReader reader = await command.ExecuteReaderAsync(CancellationToken.None);
+
+        if (!await reader.ReadAsync())
+            return null;
+
+        return ReadInvoice(reader);
     }
 
     private async IAsyncEnumerable<Invoice> StreamAsync(
